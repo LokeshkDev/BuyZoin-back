@@ -61,6 +61,10 @@ const productSchema = new mongoose.Schema({
         type: Boolean,
         default: true,
     },
+    isActive: {
+        type: Boolean,
+        default: true,
+    },
     isNewArrival: {
         type: Boolean,
         default: false,
@@ -76,6 +80,20 @@ const productSchema = new mongoose.Schema({
     tags: [{
         type: String,
     }],
+    videoLink: {
+        type: String, // Link only as requested
+        trim: true,
+    },
+    offerText: {
+        type: String,
+        trim: true,
+    },
+    discountPercentage: {
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 100,
+    },
 }, {
     timestamps: true,
 });

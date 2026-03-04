@@ -25,6 +25,8 @@ router.get('/', async (req, res) => {
             if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
         }
 
+        filter.isActive = true; // Only show active products to public
+
         // Sorting
         let sortOption = { createdAt: -1 };
         switch (sort) {
@@ -79,6 +81,57 @@ router.get('/:slug', async (req, res) => {
         res.json({ product, relatedProducts });
     } catch (error) {
         console.error('Get product error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// Get all products (admin only)
+router.get('/admin/all', auth, admin, async (req, res) => {
+    try {
+        const { category, search, sort, page = 1, limit = 12 } = req.query;
+        const filter = {};
+
+        if (category) filter.categorySlug = category;
+        if (search) {
+            filter.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { description: { $regex: search, $options: 'i' } },
+                { tags: { $regex: search, $options: 'i' } },
+            ];
+        }
+
+        // Sorting
+        let sortOption = { createdAt: -1 };
+        switch (sort) {
+            case 'price-low': sortOption = { price: 1 }; break;
+            case 'price-high': sortOption = { price: -1 }; break;
+            case 'rating': sortOption = { rating: -1 }; break;
+            case 'new': sortOption = { createdAt: -1 }; break;
+            case 'bestseller': sortOption = { reviewsCount: -1 }; break;
+        }
+
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        const [products, total] = await Promise.all([
+            Product.find(filter)
+                .sort(sortOption)
+                .skip(skip)
+                .limit(parseInt(limit))
+                .populate('category', 'name slug'),
+            Product.countDocuments(filter),
+        ]);
+
+        res.json({
+            products,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit)),
+            },
+        });
+    } catch (error) {
+        console.error('Get admin products error:', error);
         res.status(500).json({ message: 'Server error' });
     }
 });

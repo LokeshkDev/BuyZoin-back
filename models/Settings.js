@@ -65,7 +65,10 @@ const settingsSchema = new mongoose.Schema({
         banner: { type: String, default: 'https://images.unsplash.com/photo-1423666639041-f56000c27a9a?w=1200' },
         email: { type: String, default: 'hello@buyzoin.com' },
         phone: { type: String, default: '+91 98765 43210' },
+        whatsapp: { type: String, default: '+91 98765 43210' },
+        mobile: { type: String, default: '+91 98765 43210' },
         address: { type: String, default: 'Studio No. 42, Creative Area, Mumbai, Maharashtra.' },
+        gstin: { type: String, default: '' },
         studioTitle: { type: String, default: 'Visit Our Workspace' },
         studioDescription: { type: String, default: 'Come and see how we make our resin pieces. You can visit us and pick up your favorite items.' },
         studioImage: { type: String, default: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1200&q=80' }

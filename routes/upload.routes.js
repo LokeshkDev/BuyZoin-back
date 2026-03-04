@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
 const upload = require('../middleware/upload.middleware');
 const { auth, admin } = require('../middleware/auth.middleware');
 
@@ -40,6 +42,24 @@ router.post('/multiple', auth, admin, upload.array('images', 5), (req, res) => {
     } catch (error) {
         console.error('Multiple upload error:', error);
         res.status(500).json({ message: 'Upload failed' });
+    }
+});
+
+// Delete image (admin only)
+router.delete('/:filename', auth, admin, (req, res) => {
+    try {
+        const { filename } = req.params;
+        const filePath = path.join(__dirname, '../uploads', filename);
+
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            res.json({ message: 'File deleted successfully' });
+        } else {
+            res.status(404).json({ message: 'File not found' });
+        }
+    } catch (error) {
+        console.error('Delete error:', error);
+        res.status(500).json({ message: 'Delete failed' });
     }
 });
 
