@@ -2,11 +2,55 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
 const { auth, admin } = require('../middleware/auth.middleware');
+const { Cashfree, CFEnvironment } = require('cashfree-pg');
+
+
+const Settings = require('../models/Settings');
+
+// Create Cashfree Order
+router.post('/cashfree/create', auth, async (req, res) => {
+    try {
+        const { amount, orderId, customerPhone, customerEmail, customerName } = req.body;
+
+        const settings = await Settings.findOne({ type: 'homepage' });
+        const appId = settings?.payment?.cashfreeAppId || process.env.CASHFREE_APP_ID;
+        const secretKey = settings?.payment?.cashfreeSecretKey || process.env.CASHFREE_SECRET_KEY;
+        const isTest = settings?.payment?.isTestMode !== undefined ? settings.payment.isTestMode : (process.env.CASHFREE_ENV !== 'PRODUCTION');
+
+        if (!appId || !secretKey) {
+            return res.status(400).json({ message: 'Payment gateway configuration missing. Please add Cashfree keys in Admin Dashboard or .env' });
+        }
+
+        const cfEnvironment = isTest ? CFEnvironment.SANDBOX : CFEnvironment.PRODUCTION;
+        const cashfree = new Cashfree(cfEnvironment, appId, secretKey);
+
+        const request = {
+            order_amount: amount,
+            order_currency: "INR",
+            order_id: orderId,
+            customer_details: {
+                customer_id: req.user._id.toString(),
+                customer_phone: customerPhone,
+                customer_email: customerEmail || 'customer@buyzoin.com',
+                customer_name: customerName
+            },
+            order_meta: {
+                return_url: `${process.env.CLIENT_URL || 'http://localhost:5173'}/order-success?order_id={order_id}`
+            }
+        };
+
+        const response = await cashfree.PGCreateOrder(request);
+        res.json(response.data);
+    } catch (error) {
+        console.error('Cashfree order error:', error.response?.data || error.message);
+        res.status(500).json({ message: error.response?.data?.message || 'Failed to initialize payment' });
+    }
+});
 
 // Create order (authenticated)
 router.post('/', auth, async (req, res) => {
     try {
-        const { items, total, shipping, grandTotal, paymentMethod, shippingAddress, notes } = req.body;
+        const { items, total, shipping, handlingFee, grandTotal, paymentMethod, shippingAddress, notes } = req.body;
 
         if (!items || items.length === 0) {
             return res.status(400).json({ message: 'Order must have at least one item' });
@@ -20,6 +64,7 @@ router.post('/', auth, async (req, res) => {
             items,
             total,
             shipping: shipping || 0,
+            handlingFee: handlingFee || 0,
             grandTotal,
             paymentMethod: paymentMethod || 'cod',
             shippingAddress: shippingAddress || {},
@@ -104,20 +149,23 @@ router.get('/:orderId', auth, async (req, res) => {
     }
 });
 
-// Update order status (admin)
-router.put('/:id/status', auth, admin, async (req, res) => {
+// Update order (admin)
+router.put('/:id', auth, admin, async (req, res) => {
     try {
-        const { status, paymentStatus } = req.body;
+        const { status, paymentStatus, trackingNumber, courierPartner, trackingStatus } = req.body;
         const updates = {};
 
         if (status) updates.status = status;
         if (paymentStatus) updates.paymentStatus = paymentStatus;
+        if (trackingNumber !== undefined) updates.trackingNumber = trackingNumber;
+        if (courierPartner !== undefined) updates.courierPartner = courierPartner;
+        if (trackingStatus !== undefined) updates.trackingStatus = trackingStatus;
 
         if (Object.keys(updates).length === 0) {
             return res.status(400).json({ message: 'No fields to update' });
         }
 
-        const order = await Order.findByIdAndUpdate(req.params.id, updates, { new: true });
+        const order = await Order.findByIdAndUpdate(req.params.id, updates, { new: true }).populate('user', 'name email');
 
         if (!order) {
             return res.status(404).json({ message: 'Order not found' });

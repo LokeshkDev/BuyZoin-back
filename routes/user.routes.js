@@ -55,6 +55,38 @@ router.put('/change-password', auth, async (req, res) => {
     }
 });
 
+// Admin: Update user details (status/role/reset password)
+router.put('/:id', auth, admin, async (req, res) => {
+    try {
+        const { name, phone, role, password } = req.body;
+        const updates = {};
+
+        if (name) updates.name = name;
+        if (phone) updates.phone = phone;
+        if (role) updates.role = role;
+
+        let user = await User.findById(req.params.id);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Apply string updates if any
+        Object.assign(user, updates);
+
+        // If password is provided, reset it
+        if (password) {
+            user.password = password; // pre-save hook will hash it
+        }
+
+        await user.save();
+
+        res.json({ message: 'User updated successfully', user });
+    } catch (error) {
+        console.error('Admin update user error:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
 // Delete user (admin)
 router.delete('/:id', auth, admin, async (req, res) => {
     try {

@@ -43,6 +43,10 @@ const orderSchema = new mongoose.Schema({
         type: Number,
         default: 0,
     },
+    handlingFee: {
+        type: Number,
+        default: 0,
+    },
     grandTotal: {
         type: Number,
         required: true,
@@ -64,6 +68,10 @@ const orderSchema = new mongoose.Schema({
         default: 'pending',
     },
     shippingAddress: shippingAddressSchema,
+    trackingNumber: { type: String, default: '' },
+    courierPartner: { type: String, default: 'Delhivery' },
+    trackingStatus: { type: String, default: '' },
+    coupon: { type: String, default: null },
     notes: String,
 }, {
     timestamps: true,

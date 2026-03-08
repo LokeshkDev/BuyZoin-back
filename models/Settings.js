@@ -84,6 +84,39 @@ const settingsSchema = new mongoose.Schema({
         text: { type: String, default: 'Check out our new resin collection for 2026!' },
         image: { type: String, default: 'https://images.unsplash.com/photo-1611591437281-460bfbe1220a?w=1200' },
         isActive: { type: Boolean, default: false }
+    },
+    manifesto: {
+        title: { type: String, default: 'Beyond The Surface.' },
+        subtitle: { type: String, default: 'Manifesto' },
+        description: { type: String, default: 'This artifact is not just a product, but a meditation on form and fluidity. Each piece is unique, reflecting a moment in time captured in high-grade resin.' },
+        compositionTitle: { type: String, default: 'The Composition' },
+        compositionList: {
+            type: [String],
+            default: [
+                'Multi-layered archival resin',
+                'Hand-sourced natural pigments',
+                'UV Resistant glass finish'
+            ]
+        },
+        philosophyTitle: { type: String, default: 'The Philosophy' },
+        philosophyDesc: { type: String, default: '"Created to resonate within the spaces of modern architecture, bridging the gap between raw organic energy and clean geometric design."' }
+    },
+    cart: {
+        handlingFee: { type: Number, default: 50 },
+        isHandlingFeeEnabled: { type: Boolean, default: false },
+        isCouponSectionEnabled: { type: Boolean, default: true },
+        shippingFee: { type: Number, default: 150 },
+        isShippingFeeEnabled: { type: Boolean, default: true },
+        minOrderForFreeShipping: { type: Number, default: 999 }
+    },
+    payment: {
+        cashfreeAppId: { type: String, default: '' },
+        cashfreeSecretKey: { type: String, default: '' },
+        isTestMode: { type: Boolean, default: true }
+    },
+    delhivery: {
+        apiToken: { type: String, default: '' },
+        isEnabled: { type: Boolean, default: false }
     }
 }, { timestamps: true });
 
