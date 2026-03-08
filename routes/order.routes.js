@@ -35,7 +35,7 @@ router.post('/cashfree/create', auth, async (req, res) => {
                 customer_name: customerName
             },
             order_meta: {
-                return_url: `${process.env.CLIENT_URL || 'http://localhost:5173'}/order-success?order_id={order_id}`
+                return_url: `${process.env.CLIENT_URL || 'https://buyzoin-back.onrender.com'}/order-success?order_id={order_id}`
             }
         };
 
