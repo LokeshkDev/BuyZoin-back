@@ -117,6 +117,12 @@ const settingsSchema = new mongoose.Schema({
     delhivery: {
         apiToken: { type: String, default: '' },
         isEnabled: { type: Boolean, default: false }
+    },
+    policies: {
+        shipping: { type: String, default: '<h2>Shipping Policy</h2><p>This is the default shipping policy.</p>' },
+        returns: { type: String, default: '<h2>Returns & Refunds</h2><p>This is the default returns policy.</p>' },
+        privacy: { type: String, default: '<h2>Privacy Policy</h2><p>This is the default privacy policy.</p>' },
+        standards: { type: String, default: '<h2>Our Standards</h2><p>These are our default standards.</p>' }
     }
 }, { timestamps: true });
 
