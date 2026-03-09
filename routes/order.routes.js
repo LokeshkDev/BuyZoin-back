@@ -47,6 +47,55 @@ router.post('/cashfree/create', auth, async (req, res) => {
     }
 });
 
+// Verify Cashfree Payment
+router.post('/cashfree/verify', auth, async (req, res) => {
+    try {
+        const { orderId } = req.body;
+
+        const settings = await Settings.findOne({ type: 'homepage' });
+        const appId = settings?.payment?.cashfreeAppId || process.env.CASHFREE_APP_ID;
+        const secretKey = settings?.payment?.cashfreeSecretKey || process.env.CASHFREE_SECRET_KEY;
+        const isTest = settings?.payment?.isTestMode !== undefined ? settings.payment.isTestMode : (process.env.CASHFREE_ENV !== 'PRODUCTION');
+
+        if (!appId || !secretKey) {
+            return res.status(400).json({ message: 'Payment gateway configuration missing' });
+        }
+
+        const cfEnvironment = isTest ? CFEnvironment.SANDBOX : CFEnvironment.PRODUCTION;
+        const cashfree = new Cashfree(cfEnvironment, appId, secretKey);
+
+        const response = await cashfree.PGOrderFetchPayments(orderId);
+        const payments = response.data;
+
+        // Check for any successful payment for this orderId
+        const successfulPayment = payments.find(p => p.payment_status === 'SUCCESS');
+
+        const ourOrder = await Order.findOne({ orderId });
+        if (!ourOrder) {
+            return res.status(404).json({ message: 'Order not found in our records' });
+        }
+
+        if (successfulPayment) {
+            ourOrder.paymentStatus = 'paid';
+            ourOrder.status = 'processing';
+            await ourOrder.save();
+            return res.json({ status: 'paid', order: ourOrder });
+        } else {
+            // Check if there are any failed/cancelled attempts
+            const failedPayment = payments.find(p => p.payment_status === 'FAILED' || p.payment_status === 'CANCELLED');
+            if (failedPayment) {
+                ourOrder.paymentStatus = 'failed';
+                await ourOrder.save();
+                return res.json({ status: 'failed', message: 'Payment failed or cancelled' });
+            }
+            return res.json({ status: 'pending', message: 'Payment is still pending' });
+        }
+    } catch (error) {
+        console.error('Verify payment error:', error.response?.data || error.message);
+        res.status(500).json({ message: 'Verification failed' });
+    }
+});
+
 // Create order (authenticated)
 router.post('/', auth, async (req, res) => {
     try {
