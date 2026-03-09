@@ -79,16 +79,13 @@ router.post('/cashfree/verify', auth, async (req, res) => {
             ourOrder.paymentStatus = 'paid';
             ourOrder.status = 'processing';
             await ourOrder.save();
-            return res.json({ status: 'paid', order: ourOrder });
+            return res.json({ status: 'paid', order: ourOrder, message: 'Payment verified and updated automatically' });
         } else {
-            // Check if there are any failed/cancelled attempts
-            const failedPayment = payments.find(p => p.payment_status === 'FAILED' || p.payment_status === 'CANCELLED');
-            if (failedPayment) {
-                ourOrder.paymentStatus = 'failed';
-                await ourOrder.save();
-                return res.json({ status: 'failed', message: 'Payment failed or cancelled' });
-            }
-            return res.json({ status: 'pending', message: 'Payment is still pending' });
+            // If we are verifying and no success is found, we mark as failed 
+            // since the user has returned from the payment portal.
+            ourOrder.paymentStatus = 'failed';
+            await ourOrder.save();
+            return res.json({ status: 'failed', message: 'Payment verification failed - updated automatically' });
         }
     } catch (error) {
         console.error('Verify payment error:', error.response?.data || error.message);
