@@ -12,8 +12,8 @@ router.post('/single', auth, admin, upload.single('image'), (req, res) => {
             return res.status(400).json({ message: 'No file uploaded' });
         }
 
-        // Construct the URL
-        const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+        // Return only the relative path — frontend will build the full URL
+        const fileUrl = `/assets/${req.file.filename}`;
 
         res.json({
             message: 'Upload successful',
@@ -33,7 +33,8 @@ router.post('/multiple', auth, admin, upload.array('images', 5), (req, res) => {
             return res.status(400).json({ message: 'No files uploaded' });
         }
 
-        const urls = req.files.map(file => `${req.protocol}://${req.get('host')}/uploads/${file.filename}`);
+        // Return only the relative paths
+        const urls = req.files.map(file => `/assets/${file.filename}`);
 
         res.json({
             message: 'Upload successful',
@@ -49,7 +50,7 @@ router.post('/multiple', auth, admin, upload.array('images', 5), (req, res) => {
 router.delete('/:filename', auth, admin, (req, res) => {
     try {
         const { filename } = req.params;
-        const filePath = path.join(__dirname, '../uploads', filename);
+        const filePath = path.join(__dirname, '../assets', filename);
 
         if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
