@@ -51,6 +51,7 @@ router.post('/cashfree/create', auth, async (req, res) => {
 router.post('/cashfree/verify', auth, async (req, res) => {
     try {
         const { orderId } = req.body;
+        if (!orderId) return res.status(400).json({ message: 'Order ID required' });
 
         const settings = await Settings.findOne({ type: 'homepage' });
         const appId = settings?.payment?.cashfreeAppId || process.env.CASHFREE_APP_ID;
@@ -65,38 +66,43 @@ router.post('/cashfree/verify', auth, async (req, res) => {
         const cashfree = new Cashfree(cfEnvironment, appId, secretKey);
 
         const response = await cashfree.PGOrderFetchPayments(orderId);
-        const payments = response.data;
+        const payments = response.data || [];
 
-        const ourOrder = await Order.findOne({ orderId });
+        const ourOrder = await Order.findOne({ orderId: orderId.trim() });
         if (!ourOrder) {
             return res.status(404).json({ message: 'Order not found' });
         }
 
-        // Cashfree Statuses: SUCCESS, FAILED, PENDING, USER_DROPPED, etc.
-        const success = payments.find(p => p.payment_status === 'SUCCESS');
-        const pending = payments.find(p => p.payment_status === 'PENDING');
-        const failed = payments.find(p => p.payment_status === 'FAILED');
+        // Expanded Success Mapping for Production Robustness
+        const isSuccessful = payments.some(p =>
+            ['SUCCESS', 'PAID', 'CAPTURED'].includes(p.payment_status?.toUpperCase())
+        );
 
-        if (success) {
+        const isPending = payments.some(p =>
+            ['PENDING', 'INITIALIZED', 'FLAGGED'].includes(p.payment_status?.toUpperCase())
+        );
+
+        if (isSuccessful) {
             ourOrder.paymentStatus = 'paid';
             ourOrder.status = 'processing';
             await ourOrder.save();
-            return res.json({ status: 'paid', orderId, message: 'Payment successful' });
-        } else if (pending) {
+            return res.json({ status: 'paid', orderId, message: 'Verified Success' });
+        } else if (isPending) {
             ourOrder.paymentStatus = 'pending';
             await ourOrder.save();
-            return res.json({ status: 'pending', orderId, message: 'Payment is pending' });
-        } else if (failed) {
+            return res.json({ status: 'pending', orderId, message: 'Awaiting Bank Confirmation' });
+        } else if (payments.length > 0) {
+            // Only fail if we actually have payment attempts and they are all failures
             ourOrder.paymentStatus = 'failed';
             await ourOrder.save();
-            return res.json({ status: 'failed', orderId, message: 'Payment failed' });
+            return res.json({ status: 'failed', orderId, message: 'Payment Unsuccessful' });
         } else {
-            // Default to pending if no clear status yet, don't mark as failed immediately
-            return res.json({ status: 'pending', orderId, message: 'Awaiting payment confirmation' });
+            // No payment attempts seen yet - Keep as pending
+            return res.json({ status: 'pending', orderId, message: 'No payment detected yet' });
         }
     } catch (error) {
-        console.error('Cashfree Verification Error:', error.response?.data || error.message);
-        res.status(500).json({ message: 'Verification failed' });
+        console.error('CRITICAL: Cashfree Verification Error:', error.response?.data || error.message);
+        res.status(500).json({ message: 'Internal verification systems error. Please refresh.' });
     }
 });
 
