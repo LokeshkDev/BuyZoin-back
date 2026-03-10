@@ -68,9 +68,14 @@ router.post('/cashfree/verify', auth, async (req, res) => {
         const response = await cashfree.PGOrderFetchPayments(orderId);
         const payments = response.data || [];
 
-        const ourOrder = await Order.findOne({ orderId: orderId.trim() });
+        // CASE-INSENSITIVE MATCHING: Ensures BZ-2026 matches bz-2026
+        const ourOrder = await Order.findOne({
+            orderId: { $regex: new RegExp(`^${orderId.trim()}$`, 'i') }
+        });
+
         if (!ourOrder) {
-            return res.status(404).json({ message: 'Order not found' });
+            console.error(`[PAYMENT ERROR] Match failed for ID: ${orderId}`);
+            return res.status(404).json({ message: 'Order ID mismatch or not found' });
         }
 
         // Expanded Success Mapping for Production Robustness
@@ -109,13 +114,14 @@ router.post('/cashfree/verify', auth, async (req, res) => {
 // Create order (authenticated)
 router.post('/', auth, async (req, res) => {
     try {
-        const { items, total, shipping, handlingFee, grandTotal, paymentMethod, shippingAddress, notes } = req.body;
+        const { orderId: providedOrderId, items, total, shipping, handlingFee, grandTotal, paymentMethod, shippingAddress, notes, paymentStatus } = req.body;
 
         if (!items || items.length === 0) {
             return res.status(400).json({ message: 'Order must have at least one item' });
         }
 
-        const orderId = 'BZ-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random() * 9000) + 1000);
+        // Use provided orderId if available (for Cashfree sync), otherwise generate new (for COD)
+        const orderId = providedOrderId || ('BZ-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random() * 9000) + 1000));
 
         const order = await Order.create({
             orderId,
@@ -128,6 +134,7 @@ router.post('/', auth, async (req, res) => {
             paymentMethod: paymentMethod || 'cod',
             shippingAddress: shippingAddress || {},
             notes,
+            paymentStatus: paymentStatus || 'pending'
         });
 
         res.status(201).json({
