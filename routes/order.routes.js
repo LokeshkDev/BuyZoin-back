@@ -67,28 +67,35 @@ router.post('/cashfree/verify', auth, async (req, res) => {
         const response = await cashfree.PGOrderFetchPayments(orderId);
         const payments = response.data;
 
-        // Check for any successful payment for this orderId
-        const successfulPayment = payments.find(p => p.payment_status === 'SUCCESS');
-
         const ourOrder = await Order.findOne({ orderId });
         if (!ourOrder) {
-            return res.status(404).json({ message: 'Order not found in our records' });
+            return res.status(404).json({ message: 'Order not found' });
         }
 
-        if (successfulPayment) {
+        // Cashfree Statuses: SUCCESS, FAILED, PENDING, USER_DROPPED, etc.
+        const success = payments.find(p => p.payment_status === 'SUCCESS');
+        const pending = payments.find(p => p.payment_status === 'PENDING');
+        const failed = payments.find(p => p.payment_status === 'FAILED');
+
+        if (success) {
             ourOrder.paymentStatus = 'paid';
             ourOrder.status = 'processing';
             await ourOrder.save();
-            return res.json({ status: 'paid', order: ourOrder, message: 'Payment verified and updated automatically' });
-        } else {
-            // If we are verifying and no success is found, we mark as failed 
-            // since the user has returned from the payment portal.
+            return res.json({ status: 'paid', orderId, message: 'Payment successful' });
+        } else if (pending) {
+            ourOrder.paymentStatus = 'pending';
+            await ourOrder.save();
+            return res.json({ status: 'pending', orderId, message: 'Payment is pending' });
+        } else if (failed) {
             ourOrder.paymentStatus = 'failed';
             await ourOrder.save();
-            return res.json({ status: 'failed', message: 'Payment verification failed - updated automatically' });
+            return res.json({ status: 'failed', orderId, message: 'Payment failed' });
+        } else {
+            // Default to pending if no clear status yet, don't mark as failed immediately
+            return res.json({ status: 'pending', orderId, message: 'Awaiting payment confirmation' });
         }
     } catch (error) {
-        console.error('Verify payment error:', error.response?.data || error.message);
+        console.error('Cashfree Verification Error:', error.response?.data || error.message);
         res.status(500).json({ message: 'Verification failed' });
     }
 });
