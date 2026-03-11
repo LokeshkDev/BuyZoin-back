@@ -19,7 +19,7 @@ router.post('/register', async (req, res) => {
             return res.status(400).json({ message: 'Email already registered' });
         }
 
-        // Create user (password is hashed by pre-save hook)
+        // Create user
         const user = await User.create({ name, email, phone, password });
 
         // Generate token
@@ -27,16 +27,21 @@ router.post('/register', async (req, res) => {
             expiresIn: process.env.JWT_EXPIRES_IN || '7d',
         });
 
+        // Set Cookie
+        res.cookie('token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'Strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+        });
+
         res.status(201).json({
             message: 'Registration successful',
-            token,
+            token, // Keep sending token for legacy/header fallback
             user: { id: user._id, name: user.name, email: user.email, role: user.role },
         });
     } catch (error) {
         console.error('Register error:', error);
-        if (error.code === 11000) {
-            return res.status(400).json({ message: 'Email already registered' });
-        }
         res.status(500).json({ message: 'Server error' });
     }
 });
@@ -50,21 +55,26 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ message: 'Email and password are required' });
         }
 
-        // Find user with password field included
         const user = await User.findOne({ email }).select('+password');
         if (!user) {
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
-        // Check password
         const isMatch = await user.comparePassword(password);
         if (!isMatch) {
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
-        // Generate token
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
             expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+        });
+
+        // Set Cookie
+        res.cookie('token', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'Strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
         });
 
         res.json({
@@ -76,6 +86,12 @@ router.post('/login', async (req, res) => {
         console.error('Login error:', error);
         res.status(500).json({ message: 'Server error' });
     }
+});
+
+// Logout
+router.post('/logout', (req, res) => {
+    res.clearCookie('token');
+    res.json({ message: 'Logged out successfully' });
 });
 
 // Get current user

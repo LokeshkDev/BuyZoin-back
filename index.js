@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const path = require('path');
+const cookieParser = require('cookie-parser');
 const connectDB = require('./config/db');
 
 // Load env
@@ -10,7 +11,12 @@ dotenv.config();
 const app = express();
 
 // Middleware
-app.use(cors());
+const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+app.use(cors({
+    origin: clientUrl,
+    credentials: true
+}));
+app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/assets', express.static(path.join(__dirname, 'assets')));

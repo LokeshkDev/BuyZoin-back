@@ -4,7 +4,10 @@ const User = require('../models/User');
 // Verify JWT token
 const auth = async (req, res, next) => {
     try {
-        const token = req.header('Authorization')?.replace('Bearer ', '');
+        // Priority 1: Check Cookies
+        // Priority 2: Check Authorization Header
+        const token = req.cookies?.token || req.header('Authorization')?.replace('Bearer ', '');
+        
         if (!token) {
             return res.status(401).json({ message: 'Access denied. No token provided.' });
         }
