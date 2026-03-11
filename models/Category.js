@@ -28,6 +28,10 @@ const categorySchema = new mongoose.Schema({
         type: Boolean,
         default: true,
     },
+    showInSearch: {
+        type: Boolean,
+        default: false,
+    },
 }, {
     timestamps: true,
 });
