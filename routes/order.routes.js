@@ -322,26 +322,112 @@ router.get('/:orderId', auth, async (req, res) => {
     }
 });
 
+const sendStatusUpdateEmails = async (order) => {
+    try {
+        const user = order.user;
+        if (!user || !user.email) return;
+
+        const statusColors = {
+            'pending': '#ffc107',
+            'processing': '#0dcaf0',
+            'shipped': '#fd7e14',
+            'delivered': '#198754',
+            'cancelled': '#dc3545'
+        };
+
+        const statusColor = statusColors[order.status] || '#f0700d';
+        
+        const statusHtml = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                <h2 style="color: ${statusColor}; text-align: center;">Order Status Update</h2>
+                <p>Hello ${user.name || 'Artisan Customer'},</p>
+                <p>The status of your order <strong>${order.orderId}</strong> has been updated.</p>
+                
+                <div style="background: #fdf2e9; padding: 20px; border-radius: 8px; margin: 25px 0; text-align: center;">
+                    <p style="margin: 0; font-size: 14px; text-transform: uppercase; color: #666;">Current Status</p>
+                    <h1 style="margin: 5px 0; color: ${statusColor};">${order.status.toUpperCase()}</h1>
+                </div>
+
+                ${order.status === 'shipped' ? `
+                <div style="margin-top: 20px; padding: 15px; border: 1px solid #eee; border-radius: 8px; background: #fff;">
+                    <h4 style="margin: 0 0 10px 0; color: #f0700d;">Shipping Manifest</h4>
+                    <p style="margin: 3px 0;"><strong>Courier:</strong> ${order.courierPartner || 'Artisan Delivery'}</p>
+                    <p style="margin: 3px 0;"><strong>Tracking ID:</strong> ${order.trackingNumber || 'Awaiting Sync'}</p>
+                </div>
+                ` : ''}
+
+                <div style="margin-top: 30px; text-align: center;">
+                    <a href="${process.env.CLIENT_URL || 'https://buyzoin.in'}/account" style="display: inline-block; background: #f0700d; color: white; padding: 12px 25px; border-radius: 30px; text-decoration: none; font-weight: bold;">Track on Website</a>
+                </div>
+                
+                <p style="margin-top: 30px; font-size: 12px; color: #999;">If you have any questions, please contact us at ${process.env.ADMIN_EMAIL || 'kradmin@buyzoin.in'}</p>
+            </div>
+        `;
+
+        // To Customer
+        await sendEmail({
+            to: user.email,
+            subject: `Update on Order ${order.orderId}: ${order.status.toUpperCase()}`,
+            html: statusHtml
+        });
+
+        // To Admin
+        await sendEmail({
+            to: process.env.ADMIN_EMAIL || 'kradmin@buyzoin.in',
+            subject: `Status Updated: ${order.orderId} is now ${order.status}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2 style="color: #f0700d;">Admin Status Alert</h2>
+                    <p>Order <strong>${order.orderId}</strong> has been moved to <strong>${order.status}</strong>.</p>
+                    <p><strong>Customer:</strong> ${user.name} (${user.email})</p>
+                    ${order.trackingNumber ? `<p><strong>Tracking:</strong> ${order.trackingNumber} (${order.courierPartner})</p>` : ''}
+                </div>
+            `
+        });
+    } catch (err) {
+        console.error('Status update email failed:', err);
+    }
+};
+
 // Update order (admin)
 router.put('/:id', auth, admin, async (req, res) => {
     try {
         const { status, paymentStatus, trackingNumber, courierPartner, trackingStatus } = req.body;
-        const updates = {};
+        
+        // 1. Get original order to see if it exists and to check for changes
+        const originalOrder = await Order.findById(req.params.id);
+        if (!originalOrder) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
 
-        if (status) updates.status = status;
+        const updates = {};
+        let shouldNotify = false;
+
+        if (status && status !== originalOrder.status) {
+            updates.status = status;
+            shouldNotify = true;
+        }
         if (paymentStatus) updates.paymentStatus = paymentStatus;
-        if (trackingNumber !== undefined) updates.trackingNumber = trackingNumber;
-        if (courierPartner !== undefined) updates.courierPartner = courierPartner;
+        
+        if (trackingNumber !== undefined && trackingNumber !== originalOrder.trackingNumber) {
+            updates.trackingNumber = trackingNumber;
+            shouldNotify = true;
+        }
+        if (courierPartner !== undefined && courierPartner !== originalOrder.courierPartner) {
+            updates.courierPartner = courierPartner;
+            shouldNotify = true;
+        }
         if (trackingStatus !== undefined) updates.trackingStatus = trackingStatus;
 
         if (Object.keys(updates).length === 0) {
-            return res.status(400).json({ message: 'No fields to update' });
+            return res.status(400).json({ message: 'No fields changed' });
         }
 
         const order = await Order.findByIdAndUpdate(req.params.id, updates, { new: true }).populate('user', 'name email');
 
-        if (!order) {
-            return res.status(404).json({ message: 'Order not found' });
+        // 2. If status or tracking changed, send notification emails
+        if (shouldNotify) {
+            await sendStatusUpdateEmails(order);
         }
 
         res.json({ message: 'Order updated', order });
@@ -362,6 +448,65 @@ router.delete('/:id', auth, admin, async (req, res) => {
     } catch (error) {
         console.error('Delete order error:', error);
         res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// Auto-Sync Pending Payments (Admin)
+router.post('/autosync', auth, admin, async (req, res) => {
+    try {
+        const pendingOrders = await Order.find({ 
+            paymentStatus: 'pending', 
+            paymentMethod: { $ne: 'cod' },
+            createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Last 24 hours
+        });
+
+        if (pendingOrders.length === 0) {
+            return res.json({ message: 'No recent pending online orders to sync' });
+        }
+
+        const settings = await Settings.findOne({ type: 'homepage' });
+        const appId = settings?.payment?.cashfreeAppId || process.env.CASHFREE_APP_ID;
+        const secretKey = settings?.payment?.cashfreeSecretKey || process.env.CASHFREE_SECRET_KEY;
+        const isTest = settings?.payment?.isTestMode !== undefined ? settings.payment.isTestMode : (process.env.CASHFREE_ENV !== 'PRODUCTION');
+
+        if (!appId || !secretKey) {
+            return res.status(400).json({ message: 'Payment gateway configuration missing' });
+        }
+
+        const cfEnvironment = isTest ? CFEnvironment.SANDBOX : CFEnvironment.PRODUCTION;
+        const cashfree = new Cashfree(cfEnvironment, appId, secretKey);
+
+        let syncCount = 0;
+
+        for (const order of pendingOrders) {
+            try {
+                const response = await cashfree.PGOrderFetchPayments(order.orderId);
+                const payments = response.data || [];
+                
+                const isSuccessful = payments.some(p => 
+                    ['SUCCESS', 'PAID', 'CAPTURED'].includes(p.payment_status?.toUpperCase())
+                );
+
+                if (isSuccessful) {
+                    order.paymentStatus = 'paid';
+                    order.status = 'processing';
+                    await order.save();
+                    
+                    const user = await require('../models/User').findById(order.user);
+                    if (user) {
+                        await sendOrderEmails(order, user);
+                    }
+                    syncCount++;
+                }
+            } catch (err) {
+                console.error(`Sync failed for order ${order.orderId}:`, err.message);
+            }
+        }
+
+        res.json({ message: `Sync complete. Updated ${syncCount} orders.` });
+    } catch (error) {
+        console.error('AutoSync Error:', error);
+        res.status(500).json({ message: 'Synchronization error' });
     }
 });
 
