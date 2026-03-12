@@ -7,7 +7,7 @@ const orderItemSchema = new mongoose.Schema({
     price: Number,
     quantity: { type: Number, min: 1 },
     image: String,
-    customization: String,
+    customization: mongoose.Schema.Types.Mixed,
 }, { _id: false });
 
 const shippingAddressSchema = new mongoose.Schema({

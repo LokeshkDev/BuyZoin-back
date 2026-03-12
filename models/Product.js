@@ -94,6 +94,18 @@ const productSchema = new mongoose.Schema({
         min: 0,
         max: 100,
     },
+    sizes: [{
+        type: String,
+        trim: true,
+    }],
+    colors: [{
+        type: String,
+        trim: true,
+    }],
+    allowCustomColor: {
+        type: Boolean,
+        default: false,
+    },
 }, {
     timestamps: true,
 });

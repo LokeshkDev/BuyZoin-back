@@ -71,7 +71,8 @@ const settingsSchema = new mongoose.Schema({
         gstin: { type: String, default: '' },
         studioTitle: { type: String, default: 'Visit Our Workspace' },
         studioDescription: { type: String, default: 'Come and see how we make our resin pieces. You can visit us and pick up your favorite items.' },
-        studioImage: { type: String, default: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1200&q=80' }
+        studioImage: { type: String, default: 'https://images.unsplash.com/photo-1513364776144-60967b0f800f?w=1200&q=80' },
+        googleMapIframe: { type: String, default: '' }
     },
     social: {
         instagram: { type: String, default: 'https://instagram.com' },

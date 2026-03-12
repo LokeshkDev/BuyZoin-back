@@ -3,6 +3,7 @@ const router = express.Router();
 const Order = require('../models/Order');
 const { auth, admin } = require('../middleware/auth.middleware');
 const { Cashfree, CFEnvironment } = require('cashfree-pg');
+const { sendEmail } = require('../utils/email');
 
 
 const Settings = require('../models/Settings');
@@ -91,6 +92,13 @@ router.post('/cashfree/verify', auth, async (req, res) => {
             ourOrder.paymentStatus = 'paid';
             ourOrder.status = 'processing';
             await ourOrder.save();
+            
+            // Send Emails
+            const user = await require('../models/User').findById(ourOrder.user);
+            if (user) {
+                await sendOrderEmails(ourOrder, { name: user.name, email: user.email });
+            }
+
             return res.json({ status: 'paid', orderId, message: 'Verified Success' });
         } else if (isPending) {
             ourOrder.paymentStatus = 'pending';
@@ -110,6 +118,100 @@ router.post('/cashfree/verify', auth, async (req, res) => {
         res.status(500).json({ message: 'Internal verification systems error. Please refresh.' });
     }
 });
+
+const sendOrderEmails = async (order, user) => {
+    try {
+        const orderDate = new Date(order.createdAt).toLocaleDateString();
+        const itemsHtml = order.items.map(item => {
+            let details = '';
+            if (item.customization && typeof item.customization === 'object') {
+                if (item.customization.size) details += ` | Size: ${item.customization.size}`;
+                if (item.customization.color) details += ` | Color: ${item.customization.color}`;
+                if (item.customization.text) details += ` | Notes: ${item.customization.text}`;
+            } else if (item.customization) {
+                details += ` | Notes: ${item.customization}`;
+            }
+            return `
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #eee;">
+                    <strong>${item.name}</strong> x ${item.quantity}
+                    <div style="font-size: 11px; color: #666; margin-top: 4px;">${details}</div>
+                </td>
+                <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">₹${(item.price * item.quantity).toLocaleString()}</td>
+            </tr>
+        `}).join('');
+
+        const orderSummaryHtml = `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                <h2 style="color: #f0700d; text-align: center;">Order Confirmed!</h2>
+                <p>Hello ${user.name || 'Artisan Customer'},</p>
+                <p>Thank you for your order. We've received your request and our artisans are starting to prepare it.</p>
+                
+                <div style="background: #fdf2e9; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                    <p style="margin: 0;"><strong>Order ID:</strong> ${order.orderId}</p>
+                    <p style="margin: 0;"><strong>Date:</strong> ${orderDate}</p>
+                    <p style="margin: 0;"><strong>Payment Method:</strong> ${order.paymentMethod.toUpperCase()}</p>
+                    <p style="margin: 0;"><strong>Status:</strong> ${order.paymentStatus.toUpperCase()}</p>
+                </div>
+
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: #f8f8f8;">
+                            <th style="padding: 10px; text-align: left;">Item</th>
+                            <th style="padding: 10px; text-align: right;">Price</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${itemsHtml}
+                        <tr>
+                            <td style="padding: 10px; font-weight: bold;">Subtotal</td>
+                            <td style="padding: 10px; text-align: right;">₹${order.total.toLocaleString()}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 10px; font-weight: bold;">Shipping</td>
+                            <td style="padding: 10px; text-align: right;">₹${order.shipping.toLocaleString()}</td>
+                        </tr>
+                        <tr style="background: #fdf2e9;">
+                            <td style="padding: 10px; font-weight: bold; color: #f0700d;">Grand Total</td>
+                            <td style="padding: 10px; text-align: right; font-weight: bold; color: #f0700d; font-size: 18px;">₹${order.grandTotal.toLocaleString()}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div style="margin-top: 30px; padding: 15px; border: 1px solid #eee; border-radius: 8px;">
+                    <h4 style="margin-top: 0;">Shipping Address</h4>
+                    <p style="margin: 0;">${order.shippingAddress.firstName} ${order.shippingAddress.lastName}</p>
+                    <p style="margin: 0;">${order.shippingAddress.address}</p>
+                    <p style="margin: 0;">${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.pincode}</p>
+                </div>
+            </div>
+        `;
+
+        // To Customer
+        await sendEmail({
+            to: user.email,
+            subject: `Order Confirmed: ${order.orderId}`,
+            html: orderSummaryHtml
+        });
+
+        // To Admin
+        await sendEmail({
+            to: process.env.ADMIN_EMAIL || 'kradmin@buyzoin.in',
+            subject: `New Order Received: ${order.orderId}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2 style="color: #f0700d;">New Order Alert</h2>
+                    <p>A new order has been placed on BuyZoin.</p>
+                    <p><strong>Customer:</strong> ${user.name} (${user.email})</p>
+                    <hr/>
+                    ${orderSummaryHtml}
+                </div>
+            `
+        });
+    } catch (err) {
+        console.error('Order email notification failed:', err);
+    }
+};
 
 // Create order (authenticated)
 router.post('/', auth, async (req, res) => {
@@ -136,6 +238,11 @@ router.post('/', auth, async (req, res) => {
             notes,
             paymentStatus: paymentStatus || 'pending'
         });
+
+        // If COD, send emails immediately. For Online, it will be sent after verification.
+        if (order.paymentMethod === 'cod') {
+            await sendOrderEmails(order, { name: req.user.name, email: req.user.email });
+        }
 
         res.status(201).json({
             message: 'Order placed successfully',

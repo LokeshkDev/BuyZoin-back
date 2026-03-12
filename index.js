@@ -31,6 +31,7 @@ const settingsRoutes = require('./routes/settings.routes');
 const uploadRoutes = require('./routes/upload.routes');
 const reviewRoutes = require('./routes/review.routes');
 const couponRoutes = require('./routes/coupon.routes');
+const subscriberRoutes = require('./routes/subscriber.routes');
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -42,6 +43,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/coupons', couponRoutes);
+app.use('/api/subscribers', subscriberRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
