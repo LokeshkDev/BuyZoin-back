@@ -14,11 +14,14 @@ const isR2Configured = process.env.R2_ACCESS_KEY_ID &&
     process.env.R2_BUCKET_NAME &&
     process.env.R2_ENDPOINT;
 
-// Ensure local assets directory exists if not using R2
-const assetsDir = path.join(__dirname, '../assets');
-if (!isR2Configured && !fs.existsSync(assetsDir)) {
-    fs.mkdirSync(assetsDir, { recursive: true });
-}
+// Ensure local directories exist if not using R2
+const getLocalDir = (folder) => {
+    const dir = path.join(__dirname, `../${folder}`);
+    if (!isR2Configured && !fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    return dir;
+};
 
 /**
  * Image Processing Utility
@@ -34,10 +37,10 @@ const processImage = async (buffer) => {
 /**
  * Upload Helper (R2 or Local)
  */
-const performUpload = async (buffer, fieldname) => {
+const performUpload = async (buffer, fieldname, targetFolder = 'assets') => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const filename = `${fieldname}-${uniqueSuffix}.webp`; // Always use .webp for SEO
-    const key = `assets/${filename}`;
+    const key = `${targetFolder}/${filename}`;
 
     if (isR2Configured) {
         const uploadParams = {
@@ -52,9 +55,10 @@ const performUpload = async (buffer, fieldname) => {
         const cleanPublicUrl = publicUrl.endsWith('/') ? publicUrl.slice(0, -1) : publicUrl;
         return { url: `${cleanPublicUrl}/${key}`, filename: key };
     } else {
-        const localPath = path.join(assetsDir, filename);
+        const localDir = getLocalDir(targetFolder);
+        const localPath = path.join(localDir, filename);
         fs.writeFileSync(localPath, buffer);
-        return { url: `/assets/${filename}`, filename: filename };
+        return { url: `/${targetFolder}/${filename}`, filename: key };
     }
 };
 
@@ -66,8 +70,9 @@ router.post('/single', auth, admin, upload.single('image'), async (req, res) => 
         }
 
         // Optimize image before upload
+        const targetFolder = req.body.folder || 'assets';
         const optimizedBuffer = await processImage(req.file.buffer);
-        const result = await performUpload(optimizedBuffer, req.file.fieldname);
+        const result = await performUpload(optimizedBuffer, req.file.fieldname, targetFolder);
 
         res.json({
             message: 'Image optimized and uploaded successfully',
@@ -87,9 +92,10 @@ router.post('/multiple', auth, admin, upload.array('images', 10), async (req, re
             return res.status(400).json({ message: 'No files uploaded' });
         }
 
+        const targetFolder = req.body.folder || 'assets';
         const uploadPromises = req.files.map(async (file) => {
             const buffer = await processImage(file.buffer);
-            return performUpload(buffer, file.fieldname);
+            return performUpload(buffer, file.fieldname, targetFolder);
         });
 
         const results = await Promise.all(uploadPromises);
@@ -106,13 +112,18 @@ router.post('/multiple', auth, admin, upload.array('images', 10), async (req, re
 });
 
 // Delete image (admin only)
-router.delete('/:filename', auth, admin, async (req, res) => {
+router.delete('/', auth, admin, async (req, res) => {
     try {
-        const { filename } = req.params;
+        const { filename } = req.body;
+        
+        if (!filename) {
+            return res.status(400).json({ message: 'Filename required' });
+        }
 
         if (isR2Configured) {
-            // Ensure the filename (key) has the 'assets/' prefix if it's missing
-            const key = filename.startsWith('assets/') ? filename : `assets/${filename}`;
+            // filename should be the full key, e.g. "categories/filename.webp"
+            // If it doesn't have a folder prefix, default to assets
+            const key = filename.includes('/') ? filename : `assets/${filename}`;
             
             const deleteParams = {
                 Bucket: process.env.R2_BUCKET_NAME,
@@ -122,7 +133,9 @@ router.delete('/:filename', auth, admin, async (req, res) => {
             return res.json({ message: 'Cloud file deleted successfully' });
         }
 
-        const filePath = path.join(assetsDir, filename);
+        // Local deletion
+        const key = filename.includes('/') ? filename : `assets/${filename}`;
+        const filePath = path.join(__dirname, `../${key}`);
         if (fs.existsSync(filePath)) {
             fs.unlinkSync(filePath);
             res.json({ message: 'Local file deleted successfully' });
