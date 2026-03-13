@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
+const User = require('../models/User');
 const { auth, admin } = require('../middleware/auth.middleware');
 const { Cashfree, CFEnvironment } = require('cashfree-pg');
 const { sendEmail } = require('../utils/email');
@@ -94,20 +95,28 @@ router.post('/cashfree/verify', auth, async (req, res) => {
             await ourOrder.save();
             
             // Send Emails
-            const user = await require('../models/User').findById(ourOrder.user);
+            const user = await User.findById(ourOrder.user);
             if (user) {
-                await sendOrderEmails(ourOrder, { name: user.name, email: user.email });
+                await sendOrderEmails(ourOrder, user);
             }
 
             return res.json({ status: 'paid', orderId, message: 'Verified Success' });
         } else if (isPending) {
             ourOrder.paymentStatus = 'pending';
             await ourOrder.save();
+            
+            const user = await User.findById(ourOrder.user);
+            if (user) await sendStatusUpdateEmails(ourOrder);
+
             return res.json({ status: 'pending', orderId, message: 'Awaiting Bank Confirmation' });
         } else if (payments.length > 0) {
             // Only fail if we actually have payment attempts and they are all failures
             ourOrder.paymentStatus = 'failed';
             await ourOrder.save();
+            
+            const user = await User.findById(ourOrder.user);
+            if (user) await sendStatusUpdateEmails(ourOrder);
+
             return res.json({ status: 'failed', orderId, message: 'Payment Unsuccessful' });
         } else {
             // No payment attempts seen yet - Keep as pending
@@ -121,6 +130,16 @@ router.post('/cashfree/verify', auth, async (req, res) => {
 
 const sendOrderEmails = async (order, user) => {
     try {
+        // Ensure user is fresh and populated
+        if (!user || !user.email) {
+            user = await User.findById(order.user._id || order.user);
+        }
+
+        if (!user || !user.email) {
+            console.error(`❌ [OrderConfirm] Cannot send email, user data missing for order: ${order.orderId}`);
+            return false;
+        }
+
         const orderDate = new Date(order.createdAt).toLocaleDateString();
         const itemsHtml = order.items.map(item => {
             let details = '';
@@ -188,14 +207,14 @@ const sendOrderEmails = async (order, user) => {
         `;
 
         // To Customer
-        await sendEmail({
+        const customerMail = await sendEmail({
             to: user.email,
             subject: `Order Confirmed: ${order.orderId}`,
             html: orderSummaryHtml
         });
 
         // To Admin
-        await sendEmail({
+        const adminMail = await sendEmail({
             to: process.env.ADMIN_EMAIL || 'kradmin@buyzoin.in',
             subject: `New Order Received: ${order.orderId}`,
             html: `
@@ -208,8 +227,11 @@ const sendOrderEmails = async (order, user) => {
                 </div>
             `
         });
+
+        return customerMail && adminMail;
     } catch (err) {
         console.error('Order email notification failed:', err);
+        return false;
     }
 };
 
@@ -240,8 +262,15 @@ router.post('/', auth, async (req, res) => {
         });
 
         // If COD, send emails immediately. For Online, it will be sent after verification.
-        if (order.paymentMethod === 'cod') {
-            await sendOrderEmails(order, { name: req.user.name, email: req.user.email });
+        if (order.paymentMethod.toLowerCase() === 'cod') {
+            const user = await User.findById(req.user._id);
+            if (user) {
+                console.log(`📧 [COD] Triggering confirmation email for: ${user.email}`);
+                const mailResult = await sendOrderEmails(order, user);
+                console.log(`📬 [COD] Email result: ${mailResult ? 'Success' : 'Failed'}`);
+            } else {
+                console.error(`❌ [COD] User not found for ID: ${req.user._id}`);
+            }
         }
 
         res.status(201).json({
@@ -322,10 +351,18 @@ router.get('/:orderId', auth, async (req, res) => {
     }
 });
 
-const sendStatusUpdateEmails = async (order) => {
+const sendStatusUpdateEmails = async (order, isTrackingUpdate = false) => {
     try {
-        const user = order.user;
-        if (!user || !user.email) return;
+        // Ensure user is populated
+        let user = order.user;
+        if (user && !user.email) {
+            user = await User.findById(user._id || user);
+        }
+
+        if (!user || !user.email) {
+            console.error(`❌ [StatusUpdate] Cannot send email, user data missing for order: ${order.orderId}`);
+            return;
+        }
 
         const statusColors = {
             'pending': '#ffc107',
@@ -336,51 +373,56 @@ const sendStatusUpdateEmails = async (order) => {
         };
 
         const statusColor = statusColors[order.status] || '#f0700d';
+        const subject = isTrackingUpdate 
+            ? `Tracking Information Updated: Order ${order.orderId}`
+            : `Update on Order ${order.orderId}: ${order.status.toUpperCase()}`;
         
         const statusHtml = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-                <h2 style="color: ${statusColor}; text-align: center;">Order Status Update</h2>
+                <h2 style="color: ${statusColor}; text-align: center;">Order ${isTrackingUpdate ? 'Tracking' : 'Status'} Update</h2>
                 <p>Hello ${user.name || 'Artisan Customer'},</p>
-                <p>The status of your order <strong>${order.orderId}</strong> has been updated.</p>
+                <p>${isTrackingUpdate ? 'The tracking information for your order has been updated.' : `The status of your order <strong>${order.orderId}</strong> has been updated.`}</p>
                 
                 <div style="background: #fdf2e9; padding: 20px; border-radius: 8px; margin: 25px 0; text-align: center;">
-                    <p style="margin: 0; font-size: 14px; text-transform: uppercase; color: #666;">Current Status</p>
+                    <p style="margin: 0; font-size: 14px; text-transform: uppercase; color: #666;">Current Order Status</p>
                     <h1 style="margin: 5px 0; color: ${statusColor};">${order.status.toUpperCase()}</h1>
                 </div>
 
-                ${order.status === 'shipped' ? `
-                <div style="margin-top: 20px; padding: 15px; border: 1px solid #eee; border-radius: 8px; background: #fff;">
-                    <h4 style="margin: 0 0 10px 0; color: #f0700d;">Shipping Manifest</h4>
-                    <p style="margin: 3px 0;"><strong>Courier:</strong> ${order.courierPartner || 'Artisan Delivery'}</p>
-                    <p style="margin: 3px 0;"><strong>Tracking ID:</strong> ${order.trackingNumber || 'Awaiting Sync'}</p>
+                ${order.trackingNumber ? `
+                <div style="margin-top: 20px; padding: 20px; border: 2px dashed #eee; border-radius: 10px; background: #fafafa;">
+                    <h4 style="margin: 0 0 10px 0; color: #f0700d; text-transform: uppercase; font-size: 12px; letter-spacing: 1px;">Shipment Details</h4>
+                    <p style="margin: 5px 0; font-size: 15px;"><strong>Courier Partner:</strong> ${order.courierPartner || 'Standard Shipping'}</p>
+                    <p style="margin: 5px 0; font-size: 15px;"><strong>Tracking ID:</strong> <span style="color: #f0700d; font-family: monospace; font-weight: bold;">${order.trackingNumber}</span></p>
+                    ${order.trackingStatus ? `<p style="margin: 5px 0; font-size: 14px; color: #666;"><strong>Last Status:</strong> ${order.trackingStatus}</p>` : ''}
                 </div>
                 ` : ''}
 
                 <div style="margin-top: 30px; text-align: center;">
-                    <a href="${process.env.CLIENT_URL || 'https://buyzoin.in'}/account" style="display: inline-block; background: #f0700d; color: white; padding: 12px 25px; border-radius: 30px; text-decoration: none; font-weight: bold;">Track on Website</a>
+                    <a href="${process.env.CLIENT_URL || 'https://buyzoin.in'}/account" style="display: inline-block; background: #f0700d; color: white; padding: 12px 30px; border-radius: 30px; text-decoration: none; font-weight: bold; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; box-shadow: 0 4px 15px rgba(240, 112, 13, 0.2);">View Order Details</a>
                 </div>
                 
-                <p style="margin-top: 30px; font-size: 12px; color: #999;">If you have any questions, please contact us at ${process.env.ADMIN_EMAIL || 'kradmin@buyzoin.in'}</p>
+                <p style="margin-top: 40px; font-size: 12px; color: #999; text-align: center;">Need assistance? Reply to this email or reach us at ${process.env.ADMIN_EMAIL || 'kradmin@buyzoin.in'}</p>
             </div>
         `;
 
         // To Customer
         await sendEmail({
             to: user.email,
-            subject: `Update on Order ${order.orderId}: ${order.status.toUpperCase()}`,
+            subject: subject,
             html: statusHtml
         });
 
         // To Admin
         await sendEmail({
             to: process.env.ADMIN_EMAIL || 'kradmin@buyzoin.in',
-            subject: `Status Updated: ${order.orderId} is now ${order.status}`,
+            subject: `Log: ${order.orderId} ${isTrackingUpdate ? 'Tracking' : 'Status'} Update`,
             html: `
-                <div style="font-family: Arial, sans-serif; padding: 20px;">
-                    <h2 style="color: #f0700d;">Admin Status Alert</h2>
-                    <p>Order <strong>${order.orderId}</strong> has been moved to <strong>${order.status}</strong>.</p>
-                    <p><strong>Customer:</strong> ${user.name} (${user.email})</p>
-                    ${order.trackingNumber ? `<p><strong>Tracking:</strong> ${order.trackingNumber} (${order.courierPartner})</p>` : ''}
+                <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+                    <h2 style="color: #f0700d;">Status Log Update</h2>
+                    <p>Order <strong>${order.orderId}</strong> was updated by admin.</p>
+                    <p><strong>New Status:</strong> ${order.status.toUpperCase()}</p>
+                    <p><strong>Tracking Number:</strong> ${order.trackingNumber || 'N/A'}</p>
+                    <p><strong>Customer notified:</strong> Yes (${user.email})</p>
                 </div>
             `
         });
@@ -427,7 +469,8 @@ router.put('/:id', auth, admin, async (req, res) => {
 
         // 2. If status or tracking changed, send notification emails
         if (shouldNotify) {
-            await sendStatusUpdateEmails(order);
+            const isTrackingOnly = (updates.trackingNumber || updates.courierPartner) && !updates.status;
+            await sendStatusUpdateEmails(order, isTrackingOnly);
         }
 
         res.json({ message: 'Order updated', order });

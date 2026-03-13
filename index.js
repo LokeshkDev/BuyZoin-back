@@ -32,6 +32,8 @@ const uploadRoutes = require('./routes/upload.routes');
 const reviewRoutes = require('./routes/review.routes');
 const couponRoutes = require('./routes/coupon.routes');
 const subscriberRoutes = require('./routes/subscriber.routes');
+const sitemapRoutes = require('./routes/sitemap.routes');
+const { startOrderCleanupTask } = require('./utils/orderScheduler');
 
 // API Routes
 app.use('/api/auth', authRoutes);
@@ -44,6 +46,10 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/subscribers', subscriberRoutes);
+app.use('/api/sitemap', sitemapRoutes);
+
+// Dynamic Sitemap shortcut
+app.get('/sitemap.xml', (req, res) => res.redirect('/api/sitemap'));
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -69,6 +75,9 @@ const startServer = async () => {
             });
             console.log('✅ Admin user seeded: admin@buyzoin.com / admin123');
         }
+
+        // Start Auto-Cancellation Task
+        startOrderCleanupTask();
 
         app.listen(PORT, () => {
             console.log(`🚀 BuyZoin server running on port ${PORT}`);
