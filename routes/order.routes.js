@@ -398,7 +398,11 @@ const sendStatusUpdateEmails = async (order, isTrackingUpdate = false) => {
                 ` : ''}
 
                 <div style="margin-top: 30px; text-align: center;">
-                    <a href="${process.env.CLIENT_URL || 'https://buyzoin.in'}/account" style="display: inline-block; background: #f0700d; color: white; padding: 12px 30px; border-radius: 30px; text-decoration: none; font-weight: bold; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; box-shadow: 0 4px 15px rgba(240, 112, 13, 0.2);">View Order Details</a>
+                    ${(order.courierPartner && order.courierPartner.toLowerCase().includes('delhivery') && order.trackingNumber) ? `
+                        <a href="https://www.delhivery.com/track/package/${order.trackingNumber}" style="display: inline-block; background: #f0700d; color: white; padding: 12px 30px; border-radius: 30px; text-decoration: none; font-weight: bold; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; box-shadow: 0 4px 15px rgba(240, 112, 13, 0.2);">Track Your Package</a>
+                    ` : `
+                        <a href="${process.env.CLIENT_URL || 'https://buyzoin.in'}/account" style="display: inline-block; background: #f0700d; color: white; padding: 12px 30px; border-radius: 30px; text-decoration: none; font-weight: bold; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; box-shadow: 0 4px 15px rgba(240, 112, 13, 0.2);">View Order Details</a>
+                    `}
                 </div>
                 
                 <p style="margin-top: 40px; font-size: 12px; color: #999; text-align: center;">Need assistance? Reply to this email or reach us at ${process.env.ADMIN_EMAIL || 'kradmin@buyzoin.in'}</p>
