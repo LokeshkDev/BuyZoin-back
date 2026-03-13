@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Settings = require('../models/Settings');
+const Inquiry = require('../models/Inquiry');
 const { auth, admin } = require('../middleware/auth.middleware');
 
 const { verifyRecaptcha } = require('../middleware/recaptcha.middleware');
@@ -39,7 +40,10 @@ const { sendEmail } = require('../utils/email');
 // Submit contact form (public + reCAPTCHA)
 router.post('/contact', verifyRecaptcha, async (req, res) => {
     try {
-        const { name, email, message } = req.body;
+        const { name, email, phone, message } = req.body;
+
+        // Save to DB
+        await Inquiry.create({ name, email, phone, message });
         
         // Notify Admin
         await sendEmail({
@@ -50,6 +54,7 @@ router.post('/contact', verifyRecaptcha, async (req, res) => {
                     <h2 style="color: #f0700d;">New Inquiry</h2>
                     <p><strong>Name:</strong> ${name}</p>
                     <p><strong>Email:</strong> ${email}</p>
+                    <p><strong>Phone:</strong> ${phone || 'Not provided'}</p>
                     <p><strong>Message:</strong></p>
                     <div style="background: #f4f4f4; padding: 15px; border-radius: 5px;">
                         ${message}
